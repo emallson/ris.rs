@@ -1,5 +1,5 @@
 # ris.rs -- Reverse Influence Sampling Iterators in Rust
-
+[![Build Status](https://travis-ci.org/emallson/ris.rs.svg?branch=master)](https://travis-ci.org/emallson/ris.rs)
 ```toml
 [dependencies]
 ris = { version = "0.1", git = "https://github.com/emallson/ris.rs.git" }
