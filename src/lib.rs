@@ -8,15 +8,16 @@ extern crate quickcheck;
 
 use bit_set::BitSet;
 use petgraph::prelude::*;
-use rand::{Rng, thread_rng};
-use rand::distributions::{Range, Sample};
+use rand::{Rng, thread_rng, sample as rng_sample};
+use rand::distributions::{Range, Sample, IndependentSample};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::iter::FromIterator;
 use rayon::prelude::*;
 
-pub trait TriggeringModel<'a, N, E>: Iterator<Item = NodeIndex> + Sized {
-    fn new(g: &'a Graph<N, E>, source: NodeIndex) -> Self;
+pub trait TriggeringModel<N, E> {
+    fn new<V: FromIterator<NodeIndex>>(g: &Graph<N, E>, source: NodeIndex) -> V;
 
-    fn new_uniform(g: &'a Graph<N, E>) -> Self {
+    fn new_uniform<V: FromIterator<NodeIndex>>(g: &Graph<N, E>) -> V {
         let mut rng = thread_rng();
         let source = *rng.choose(&g.node_indices().collect::<Vec<_>>()).unwrap();
         Self::new(g, source)
@@ -24,25 +25,23 @@ pub trait TriggeringModel<'a, N, E>: Iterator<Item = NodeIndex> + Sized {
 }
 
 /// Generate a `k`-element sample from a graph `g` under model `M`
-pub fn sample<'a, 'b, N, E, M>
-    (g: &'a Graph<N, E>,
-     k: usize)
-     -> (BTreeMap<NodeIndex, BTreeSet<NodeIndex>>, BTreeMap<NodeIndex, usize>)
-    where 'a: 'b,
-          N: Sync,
+pub fn sample<N, E, M>(g: &Graph<N, E>,
+                       k: usize)
+                       -> (BTreeMap<NodeIndex, BTreeSet<NodeIndex>>, BTreeMap<NodeIndex, usize>)
+    where N: Sync,
           E: Sync,
-          M: TriggeringModel<'b, N, E>
+          M: TriggeringModel<N, E>
 {
     let mut rng = thread_rng();
-    let ind = g.node_indices().collect::<Vec<_>>();
-    let roots = (0..k).map(|_| *rng.choose(&ind).unwrap()).collect::<Vec<_>>();
+    let ind = g.node_indices().collect::<Vec<NodeIndex>>();
+    let roots = rng_sample(&mut rng, &ind, k);
 
     let mut sets: Vec<BTreeSet<NodeIndex>> = Vec::with_capacity(k);
-    roots.par_iter().map(|&root| M::new(&g, root).collect()).collect_into(&mut sets);
+    roots.par_iter().map(|&&root| M::new(&g, root)).collect_into(&mut sets);
 
     let mut map = BTreeMap::new();
     let mut counts = BTreeMap::new();
-    for (root, set) in roots.into_iter().zip(sets) {
+    for (&root, set) in roots.into_iter().zip(sets) {
         for el in set {
             map.entry(el).or_insert_with(|| BTreeSet::new()).insert(root);
             *counts.entry(el).or_insert(0) += 1;
@@ -68,50 +67,29 @@ pub fn sample<'a, 'b, N, E, M>
 ///     (2, 3, 0.5), (3, 1, 0.2)
 /// ]);
 ///
-/// let sample: Vec<NodeIndex> = IC::new(&g, NodeIndex::new(0)).collect();
+/// let sample: Vec<NodeIndex> = IC::new(&g, NodeIndex::new(0));
 /// # }
 /// ```
 #[derive(Clone)]
-pub struct IC<'a, N: 'a, E: 'a + Into<f32> + Clone, R: Rng> {
-    graph: &'a Graph<N, E>,
-    queue: VecDeque<NodeIndex>,
-    rng: R,
-    // used to guarantee each edge is processed only once
-    activated: BitSet,
-}
+pub struct IC {}
 
-impl<'a, N: 'a, E: 'a + Into<f32> + Clone> TriggeringModel<'a, N, E>
-    for IC<'a, N, E, rand::ThreadRng> {
-    fn new(g: &'a Graph<N, E>, source: NodeIndex) -> Self {
-        IC::with_rng(g, source, rand::thread_rng())
-    }
-}
+impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for IC {
+    fn new<V: FromIterator<NodeIndex>>(graph: &Graph<N, E>, source: NodeIndex) -> V {
+        let mut activated = BitSet::new();
+        activated.insert(source.index());
+        let mut queue = VecDeque::from(vec![source]);
+        let mut rng = thread_rng();
 
-impl<'a, N, E: Into<f32> + Clone, R: Rng> IC<'a, N, E, R> {
-    pub fn with_rng(g: &'a Graph<N, E>, source: NodeIndex, rng: R) -> Self {
-        let mut act = BitSet::new();
-        act.insert(source.index());
-        IC {
-            graph: g,
-            queue: vec![source].into(),
-            rng: rng,
-            activated: act,
-        }
-    }
-}
+        let mut sample = Vec::new();
 
-impl<'a, N, E: Into<f32> + Clone, R: Rng> Iterator for IC<'a, N, E, R> {
-    type Item = NodeIndex;
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(node) = self.queue.pop_front() {
+        while let Some(node) = queue.pop_front() {
             let mut uniform = Range::new(0.0, 1.0);
             // generate a list of new, unactivated neighbors
-            let mut stack_ext: VecDeque<_> = self.graph
-                .edges_directed(node, Incoming)
+            let mut stack_ext: VecDeque<_> = graph.edges_directed(node, Incoming)
                 .filter_map(|edge| {
-                    if !self.activated.contains(edge.source().index()) &&
-                       uniform.sample(&mut self.rng) <= edge.weight().clone().into() {
-                        self.activated.insert(edge.source().index());
+                    if !activated.contains(edge.source().index()) &&
+                       uniform.sample(&mut rng) <= (*edge.weight()).into() {
+                        activated.insert(edge.source().index());
                         Some(edge.source().clone())
                     } else {
                         None
@@ -119,89 +97,77 @@ impl<'a, N, E: Into<f32> + Clone, R: Rng> Iterator for IC<'a, N, E, R> {
                 })
                 .collect();
 
-            self.queue.append(&mut stack_ext);
+            queue.append(&mut stack_ext);
+            sample.push(node);
+        }
 
-            Some(node)
-        } else {
-            None
+        V::from_iter(sample.into_iter())
+    }
+}
+
+/// LT Live-Edge model. It is assumed that the input graph has each in-neighborhood weighted s.t.
+/// the sum of edge weights `W` satisfies `0 <= W <= 1`.
+pub struct LT {}
+
+/// Reweight the gaph to satisfy the LT assumptions. `alpha` is the probability of no edge being
+/// selected.
+pub fn reweight_lt<N: Clone, E: Into<f32> + Clone>(g: &Graph<N, E>, alpha: f32) -> Graph<N, f32> {
+    let mut g: Graph<N, f32> = g.map(|_, n| n.clone(), |_, e| e.clone().into());
+    for node in g.node_indices() {
+        let sum: f32 = g.edges_directed(node, Incoming).map(|edge| *edge.weight()).sum();
+        let mut edges = g.neighbors_directed(node, Incoming).detach();
+        while let Some(edge) = edges.next_edge(&g) {
+            g[edge] = g[edge] / sum * (1.0 - alpha);
         }
     }
+    g
 }
 
-pub struct LT<'a, N: 'a, E: 'a + Into<f32> + Clone, R: Rng> {
-    graph: &'a Graph<N, E>,
-    next: Option<NodeIndex>,
-    rng: R,
-    activated: BitSet,
-}
+impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for LT {
+    fn new<V: FromIterator<NodeIndex>>(graph: &Graph<N, E>, source: NodeIndex) -> V {
+        let mut activated = BitSet::new();
+        activated.insert(source.index());
+        let mut rng = thread_rng();
+        let uniform = Range::new(0.0, 1.0);
 
-impl<'a, N, E: Into<f32> + Clone> TriggeringModel<'a, N, E> for LT<'a, N, E, rand::ThreadRng> {
-    fn new(g: &'a Graph<N, E>, source: NodeIndex) -> Self {
-        LT::with_rng(g, source, rand::thread_rng())
-    }
-}
-
-impl<'a, N, E: Into<f32> + Clone> LT<'a, N, E, rand::ThreadRng> {}
-
-impl<'a, N, E: Into<f32> + Clone, R: Rng> LT<'a, N, E, R> {
-    pub fn with_rng(g: &'a Graph<N, E>, source: NodeIndex, rng: R) -> Self {
-        let mut act = BitSet::new();
-        act.insert(source.index());
-        LT {
-            graph: g,
-            next: Some(source),
-            rng: rng,
-            activated: act,
-        }
-    }
-}
-
-impl<'a, N, E: Into<f32> + Clone, R: Rng> Iterator for LT<'a, N, E, R> {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(node) = self.next {
+        let mut sample = Vec::new();
+        let mut next = Some(source);
+        while let Some(node) = next {
             // TODO: binary search instead of linear scan
-            let goal: f32 = self.rng.gen();
+            let goal = uniform.ind_sample(&mut rng);
             if goal <=
-               self.graph
-                .edges_directed(node, Incoming)
-                .map(|edge| edge.weight().clone().into())
+               graph.edges_directed(node, Incoming)
+                .map(|edge| (*edge.weight()).into())
                 .sum() {
                 let mut activator = None;
-                let mut sum = 0f32;
-                for edge in self.graph.edges_directed(node, Incoming) {
-                    sum += edge.weight().clone().into();
+                let mut sum = 0f64;
+                for edge in graph.edges_directed(node, Incoming) {
+                    sum += (*edge.weight()).into();
                     if sum >= goal {
-                        if !self.activated.contains(edge.source().index()) {
-                            self.activated.insert(edge.source().index());
-                            activator = Some(edge.source().clone());
+                        if !activated.contains(edge.source().index()) {
+                            activated.insert(edge.source().index());
+                            activator = Some(edge.source());
                             break;
                         }
                     }
                 }
 
-                self.next = activator;
+                next = activator;
             } else {
-                self.next = None;
+                next = None;
             }
 
-            Some(node)
-        } else {
-            None
+            sample.push(node);
         }
+        V::from_iter(sample.into_iter())
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use petgraph::prelude::*;
-    use petgraph::graph::node_index;
     use quickcheck::TestResult;
     use std::cmp::Ordering;
-
-    use rand::isaac::IsaacRng;
 
     /// Re-weight a graph from the entire f32 range to just `[0, 1]`.
     pub fn reweight(g: Graph<(), f32>) -> Graph<(), f32> {
@@ -239,7 +205,7 @@ mod test {
                         let g = reweight(g);
 
                         let source = node_index(source);
-                        let sample: Vec<_> = $M::new(&g, source).collect();
+                        let sample: Vec<_> = $M::new(&g, source);
                         let set: BTreeSet<_> = sample.iter().cloned().collect();
                         if set.len() != sample.len()
                         {
@@ -256,7 +222,7 @@ mod test {
 
                         let g = reweight(g);
                         let source = node_index(source);
-                        let sample: Vec<_> = $M::new(&g, source).collect();
+                        let sample: Vec<_> = $M::new(&g, source);
 
     // due to the ordering of sampling, we know that each node has to be reachable by one
     // of the prior nodes (excluding, of course, the first node)
@@ -279,19 +245,4 @@ mod test {
 
     ris_props!(ic, IC);
     ris_props!(lt, LT);
-
-    #[test]
-    fn with_rng() {
-        let rng = IsaacRng::new_unseeded();
-        let g: Graph<(), f32> = Graph::from_edges(&[(1, 0, 0.8),
-                                                    (2, 0, 0.3),
-                                                    (0, 1, 0.2),
-                                                    (2, 1, 0.7),
-                                                    (3, 1, 0.95),
-                                                    (1, 3, 0.2)]);
-        let sample: Vec<_> = IC::with_rng(&g, node_index(0), rng).collect();
-
-        // with the default seed (which is fixed), the sample is [0, 1, 3].
-        assert!(sample == vec![node_index(0), node_index(1), node_index(3)]);
-    }
 }
