@@ -19,7 +19,8 @@ pub trait TriggeringModel<N, E> {
 
     fn new_uniform<V: FromIterator<NodeIndex>>(g: &Graph<N, E>) -> V {
         let mut rng = thread_rng();
-        let source = *rng.choose(&g.node_indices().collect::<Vec<_>>()).unwrap();
+        let range = Range::new(0, g.node_count());
+        let source = NodeIndex::new(range.ind_sample(&mut rng));
         Self::new(g, source)
     }
 }
@@ -147,8 +148,8 @@ impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for LT {
                         if !activated.contains(edge.source().index()) {
                             activated.insert(edge.source().index());
                             activator = Some(edge.source());
-                            break;
                         }
+                        break;
                     }
                 }
 

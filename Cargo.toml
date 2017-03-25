@@ -1,17 +1,22 @@
 [package]
 authors = ["J David Smith <emallson@atlanis.net>"]
+license = "BSD-3-Clause"
 name = "ris"
 version = "0.1.0"
-license = "BSD-3-Clause"
 
 [dependencies]
 bit-set = "0.4.0"
 rand = "0.3.15"
 rayon = "0.6.0"
 
+[dependencies.petgraph]
+features = ["quickcheck"]
+version = "0.4.3"
+
 [dev-dependencies]
 quickcheck = "0.4.1"
+bencher = "0.1.2"
 
-[dependencies.petgraph]
-version = "0.4.3"
-features = ["quickcheck"]
+[[bench]]
+name = "ris"
+harness = false
