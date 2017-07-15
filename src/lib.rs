@@ -26,9 +26,7 @@ pub trait TriggeringModel<N, E> {
 }
 
 /// Generate a `k`-element sample from a graph `g` under model `M`
-pub fn sample<N, E, M>(g: &Graph<N, E>,
-                       k: usize)
-                       -> (BTreeMap<NodeIndex, BTreeSet<NodeIndex>>, BTreeMap<NodeIndex, usize>)
+pub fn sample<N, E, M, U: FromIterator<NodeIndex> + Send>(g: &Graph<N, E>, k: usize) -> Vec<U>
     where N: Sync,
           E: Sync,
           M: TriggeringModel<N, E>
@@ -37,19 +35,9 @@ pub fn sample<N, E, M>(g: &Graph<N, E>,
     let ind = g.node_indices().collect::<Vec<NodeIndex>>();
     let roots = rng_sample(&mut rng, &ind, k);
 
-    let mut sets: Vec<BTreeSet<NodeIndex>> = Vec::with_capacity(k);
+    let mut sets: Vec<U> = Vec::with_capacity(k);
     roots.par_iter().map(|&&root| M::new(&g, root)).collect_into(&mut sets);
-
-    let mut map = BTreeMap::new();
-    let mut counts = BTreeMap::new();
-    for (&root, set) in roots.into_iter().zip(sets) {
-        for el in set {
-            map.entry(el).or_insert_with(|| BTreeSet::new()).insert(root);
-            *counts.entry(el).or_insert(0) += 1;
-        }
-    }
-
-    (map, counts)
+    sets
 }
 
 /// A RIS sampler following the IC model.
@@ -199,6 +187,16 @@ mod test {
                 use std::collections::BTreeSet;
 
                 quickcheck! {
+                    fn source_contained(g: Graph<(), f32>, source: usize) -> TestResult {
+                        if source >= g.node_count() || g.edge_count() == 0 {
+                            return TestResult::discard();
+                        }
+                        let g = reweight(g);
+
+                        let source = node_index(source);
+                        let sample: Vec<_> = $M::new(&g, source);
+                        TestResult::from_bool(sample.contains(&source))
+                    }
                     fn unique(g: Graph<(), f32>, source: usize) -> TestResult {
                         if source >= g.node_count() || g.edge_count() == 0 {
                             return TestResult::discard();
