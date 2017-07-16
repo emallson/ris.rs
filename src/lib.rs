@@ -32,11 +32,14 @@ pub fn sample<N, E, M, U: FromIterator<NodeIndex> + Send>(g: &Graph<N, E>, k: us
           M: TriggeringModel<N, E>
 {
     let mut rng = thread_rng();
-    let ind = g.node_indices().collect::<Vec<NodeIndex>>();
-    let roots = rng_sample(&mut rng, &ind, k);
+    let mut roots = Vec::with_capacity(k);
+    let indices = g.node_indices().collect::<Vec<_>>();
+    for _ in 0..k {
+        roots.push(*rng.choose(&indices).unwrap());
+    }
 
     let mut sets: Vec<U> = Vec::with_capacity(k);
-    roots.par_iter().map(|&&root| M::new(&g, root)).collect_into(&mut sets);
+    roots.par_iter().map(|&root| M::new(&g, root)).collect_into(&mut sets);
     sets
 }
 
