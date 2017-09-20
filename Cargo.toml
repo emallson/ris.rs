@@ -4,6 +4,10 @@ license = "BSD-3-Clause"
 name = "ris"
 version = "0.1.0"
 
+[[bench]]
+harness = false
+name = "ris"
+
 [dependencies]
 bit-set = "0.4.0"
 rand = "0.3.15"
@@ -13,10 +17,11 @@ rayon = "0.8"
 features = ["quickcheck"]
 version = "0.4.7"
 
-[dev-dependencies]
-quickcheck = "0.4.1"
-bencher = "0.1.2"
+[dependencies.vec-graph]
+git = "https://github.com/emallson/vec-graph.git"
+optional = false
 
-[[bench]]
-name = "ris"
-harness = false
+[dev-dependencies]
+bencher = "0.1.2"
+quickcheck = "0.4.1"
+

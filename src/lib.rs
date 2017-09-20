@@ -5,48 +5,68 @@ extern crate rayon;
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
+extern crate vec_graph;
 
 use bit_set::BitSet;
 use petgraph::prelude::*;
+use petgraph::graph::GraphIndex;
+use petgraph::visit::{GraphRef, IntoNodeIdentifiers, Data, NodeCount};
+use vec_graph::IntoNeighborEdgesDirected;
 use rand::{Rng, thread_rng};
 use rand::distributions::{Range, Sample, IndependentSample};
 use std::collections::VecDeque;
 use std::iter::FromIterator;
 use rayon::prelude::*;
 
-pub trait TriggeringModel<N, E> {
-    fn new<V: FromIterator<NodeIndex>, R: Rng>(rng: &mut R,
-                                               g: &Graph<N, E>,
-                                               source: NodeIndex)
-                                               -> V;
+pub trait TriggeringModel<G: GraphRef + Data<NodeWeight = N, EdgeWeight = E>, N, E>
+    
+    where G::NodeId: GraphIndex,
+          G::EdgeId: GraphIndex
+{
+    fn new<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, g: G, source: G::NodeId) -> V;
 
-    fn new_uniform<V: FromIterator<NodeIndex>>(g: &Graph<N, E>) -> V {
+    fn new_uniform<V: FromIterator<G::NodeId>>(g: G) -> V
+        where G::NodeId: From<usize>,
+              G: NodeCount
+    {
         let mut rng = thread_rng();
         Self::new_uniform_with(&mut rng, g)
     }
 
-    fn new_uniform_with<V: FromIterator<NodeIndex>, R: Rng>(rng: &mut R, g: &Graph<N, E>) -> V {
+    fn new_uniform_with<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, g: G) -> V
+        where G::NodeId: From<usize>,
+              G: NodeCount
+    {
         let range = Range::new(0, g.node_count());
-        let source = NodeIndex::new(range.ind_sample(rng));
+        let source = range.ind_sample(rng).into();
         Self::new(rng, g, source)
     }
 }
 
 /// Generate a `k`-element sample from a graph `g` under model `M`
-pub fn sample<N, E, M, U: FromIterator<NodeIndex> + Send>(g: &Graph<N, E>, k: usize) -> Vec<U>
+pub fn sample<G: GraphRef + Data<NodeWeight = N, EdgeWeight = E> + NodeCount + IntoNodeIdentifiers + Sync,
+              N,
+              E,
+              M,
+              U: FromIterator<G::NodeId> + Send>
+    (g: G,
+     k: usize)
+     -> Vec<U>
     where N: Sync,
           E: Sync,
-          M: TriggeringModel<N, E>
+          M: TriggeringModel<G, N, E>,
+          G::NodeId: GraphIndex + Send + Sync,
+          G::EdgeId: GraphIndex
 {
     let mut rng = thread_rng();
     let mut roots = Vec::with_capacity(k);
-    let indices = g.node_indices().collect::<Vec<_>>();
+    let indices = g.node_identifiers().collect::<Vec<_>>();
     for _ in 0..k {
         roots.push(*rng.choose(&indices).unwrap());
     }
 
     let mut sets: Vec<U> = Vec::with_capacity(k);
-    roots.par_iter().map(|&root| M::new(&mut thread_rng(), &g, root)).collect_into(&mut sets);
+    roots.par_iter().map(|&root| M::new(&mut thread_rng(), g, root)).collect_into(&mut sets);
     sets
 }
 
@@ -74,11 +94,11 @@ pub fn sample<N, E, M, U: FromIterator<NodeIndex> + Send>(g: &Graph<N, E>, k: us
 #[derive(Clone)]
 pub struct IC {}
 
-impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for IC {
-    fn new<V: FromIterator<NodeIndex>, R: Rng>(rng: &mut R,
-                                               graph: &Graph<N, E>,
-                                               source: NodeIndex)
-                                               -> V {
+impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, EdgeWeight=E>, N, E: Copy + Into<f64>> TriggeringModel<G, N, E> for IC
+    where G::NodeId: GraphIndex,
+          G::EdgeId: GraphIndex
+{
+    fn new<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, graph: G, source: G::NodeId) -> V {
         let mut activated = BitSet::new();
         activated.insert(source.index());
         let mut queue = VecDeque::from(vec![source]);
@@ -87,7 +107,8 @@ impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for IC {
 
         while let Some(node) = queue.pop_front() {
             let mut uniform = Range::new(0.0, 1.0);
-            // generate a list of new, unactivated neighbors
+
+// generate a list of new, unactivated neighbors
             let mut stack_ext: VecDeque<_> = graph.edges_directed(node, Incoming)
                 .filter_map(|edge| {
                     if !activated.contains(edge.source().index()) &&
@@ -126,11 +147,11 @@ pub fn reweight_lt<N: Clone, E: Into<f32> + Clone>(g: &Graph<N, E>, alpha: f32) 
     g
 }
 
-impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for LT {
-    fn new<V: FromIterator<NodeIndex>, R: Rng>(rng: &mut R,
-                                               graph: &Graph<N, E>,
-                                               source: NodeIndex)
-                                               -> V {
+impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, EdgeWeight=E>, N, E: Copy + Into<f64>> TriggeringModel<G, N, E> for LT
+    where G::NodeId: GraphIndex,
+          G::EdgeId: GraphIndex
+{
+    fn new<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, graph: G, source: G::NodeId) -> V {
         let mut activated = BitSet::new();
         activated.insert(source.index());
         let uniform = Range::new(0.0, 1.0);
@@ -138,7 +159,7 @@ impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for LT {
         let mut sample = Vec::new();
         let mut next = Some(source);
         while let Some(node) = next {
-            // TODO: binary search instead of linear scan
+// TODO: binary search instead of linear scan
             let goal = uniform.ind_sample(rng);
             if goal <=
                graph.edges_directed(node, Incoming)
@@ -172,6 +193,7 @@ impl<N, E: Copy + Into<f64>> TriggeringModel<N, E> for LT {
 mod test {
     use super::*;
     use quickcheck::TestResult;
+    use vec_graph::VecGraph;
     use std::cmp::Ordering;
 
     /// Re-weight a graph from the entire f32 range to just `[0, 1]`.
@@ -191,6 +213,17 @@ mod test {
             let g = reweight(g);
 
             TestResult::from_bool(!g.edge_references().any(|edge| edge.weight() < &0.0 || edge.weight() > &1.0))
+        }
+
+        fn accepts_vec_graph(g: Graph<(), f32>) -> TestResult {
+            if g.edge_count() == 0 {
+                return TestResult::discard();
+            }
+            let vg = VecGraph::from_petgraph(g);
+
+            let ic = IC::new_uniform::<Vec<_>>(&vg);
+            let lt = LT::new_uniform::<Vec<_>>(&vg);
+            TestResult::passed()
         }
     }
 
