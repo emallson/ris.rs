@@ -7,11 +7,11 @@ version = "0.1.0"
 [dependencies]
 bit-set = "0.4.0"
 rand = "0.3.15"
-rayon = "0.6.0"
+rayon = "0.8"
 
 [dependencies.petgraph]
 features = ["quickcheck"]
-version = "0.4.3"
+version = "0.4.7"
 
 [dev-dependencies]
 quickcheck = "0.4.1"
