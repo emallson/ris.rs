@@ -21,7 +21,13 @@ version = "0.4.7"
 git = "https://github.com/emallson/vec-graph.git"
 optional = false
 
+[dependencies.fnv]
+version = "1.0.5"
+optional = true
+
 [dev-dependencies]
 bencher = "0.1.2"
 quickcheck = "0.4.1"
 
+[features]
+hash = ["fnv"]

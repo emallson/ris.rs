@@ -6,8 +6,13 @@ extern crate rayon;
 #[macro_use]
 extern crate quickcheck;
 extern crate vec_graph;
+#[cfg(feature = "hash")]
+extern crate fnv;
 
+#[cfg(not(feature = "hash"))]
 use bit_set::BitSet;
+#[cfg(feature = "hash")]
+use fnv::FnvHashSet;
 use petgraph::prelude::*;
 use petgraph::graph::GraphIndex;
 use petgraph::visit::{GraphRef, IntoNodeIdentifiers, Data, NodeCount};
@@ -99,7 +104,10 @@ impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, Ed
           G::EdgeId: GraphIndex
 {
     fn new<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, graph: G, source: G::NodeId) -> V {
+        #[cfg(not(feature = "hash"))]
         let mut activated = BitSet::new();
+        #[cfg(feature = "hash")]
+        let mut activated = FnvHashSet::default();
         activated.insert(source.index());
         let mut queue = VecDeque::from(vec![source]);
 
@@ -111,7 +119,11 @@ impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, Ed
 // generate a list of new, unactivated neighbors
             let mut stack_ext: VecDeque<_> = graph.edges_directed(node, Incoming)
                 .filter_map(|edge| {
-                    if !activated.contains(edge.source().index()) &&
+                    #[cfg(not(feature = "hash"))]
+                    let contained = activated.contains(edge.source().index());
+                    #[cfg(feature = "hash")]
+                    let contained = activated.contains(&edge.source().index());
+                    if !contained &&
                        uniform.sample(rng) <= (*edge.weight()).into() {
                         activated.insert(edge.source().index());
                         Some(edge.source().clone())
@@ -152,7 +164,10 @@ impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, Ed
           G::EdgeId: GraphIndex
 {
     fn new<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, graph: G, source: G::NodeId) -> V {
+        #[cfg(not(feature = "hash"))]
         let mut activated = BitSet::new();
+        #[cfg(feature = "hash")]
+        let mut activated = FnvHashSet::default();
         activated.insert(source.index());
         let uniform = Range::new(0.0, 1.0);
 
@@ -170,7 +185,11 @@ impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, Ed
                 for edge in graph.edges_directed(node, Incoming) {
                     sum += (*edge.weight()).into();
                     if sum >= goal {
-                        if !activated.contains(edge.source().index()) {
+                        #[cfg(not(feature = "hash"))]
+                        let contained = activated.contains(edge.source().index());
+                        #[cfg(feature = "hash")]
+                        let contained = activated.contains(&edge.source().index());
+                        if !contained {
                             activated.insert(edge.source().index());
                             activator = Some(edge.source());
                         }
