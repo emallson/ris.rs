@@ -4,14 +4,15 @@ license = "BSD-3-Clause"
 name = "ris"
 version = "0.1.0"
 
-[[bench]]
-harness = false
-name = "ris"
-
 [dependencies]
+as_num = "0.2.3"
 bit-set = "0.4.0"
 rand = "0.3.15"
 rayon = "0.8"
+
+[dependencies.fnv]
+optional = true
+version = "1.0.5"
 
 [dependencies.petgraph]
 features = ["quickcheck"]
@@ -21,12 +22,7 @@ version = "0.4.7"
 git = "https://github.com/emallson/vec-graph.git"
 optional = false
 
-[dependencies.fnv]
-version = "1.0.5"
-optional = true
-
 [dev-dependencies]
-bencher = "0.1.2"
 quickcheck = "0.4.1"
 
 [features]

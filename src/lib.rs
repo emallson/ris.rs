@@ -6,6 +6,7 @@ extern crate rayon;
 #[macro_use]
 extern crate quickcheck;
 extern crate vec_graph;
+extern crate as_num;
 #[cfg(feature = "hash")]
 extern crate fnv;
 
@@ -19,9 +20,11 @@ use petgraph::visit::{GraphRef, IntoNodeIdentifiers, Data, NodeCount};
 use vec_graph::IntoNeighborEdgesDirected;
 use rand::{Rng, thread_rng};
 use rand::distributions::{Range, Sample, IndependentSample};
+use rand::distributions::range::SampleRange;
 use std::collections::VecDeque;
 use std::iter::FromIterator;
 use rayon::prelude::*;
+use as_num::{AsNumInternal, AsNum};
 
 pub trait TriggeringModel<G: GraphRef + Data<NodeWeight = N, EdgeWeight = E>, N, E>
     
@@ -29,9 +32,20 @@ pub trait TriggeringModel<G: GraphRef + Data<NodeWeight = N, EdgeWeight = E>, N,
           G::EdgeId: GraphIndex
 {
     fn new<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, g: G, source: G::NodeId) -> V;
+}
 
+pub trait TriggeringModelUniform<G: GraphRef + Data<NodeWeight = N, EdgeWeight = E>,
+                                 N,
+                                 E,
+                                 Ix = petgraph::graph::DefaultIx>
+    : TriggeringModel<G, N, E>
+    where G::NodeId: GraphIndex + From<Ix>,
+          G::EdgeId: GraphIndex,
+          Ix: SampleRange + PartialOrd + AsNumInternal<usize> + std::fmt::Debug,
+          usize: AsNumInternal<Ix>
+{
     fn new_uniform<V: FromIterator<G::NodeId>>(g: G) -> V
-        where G::NodeId: From<usize>,
+        where G::NodeId: From<Ix>,
               G: NodeCount
     {
         let mut rng = thread_rng();
@@ -39,10 +53,10 @@ pub trait TriggeringModel<G: GraphRef + Data<NodeWeight = N, EdgeWeight = E>, N,
     }
 
     fn new_uniform_with<V: FromIterator<G::NodeId>, R: Rng>(rng: &mut R, g: G) -> V
-        where G::NodeId: From<usize>,
+        where G::NodeId: From<Ix>,
               G: NodeCount
     {
-        let range = Range::new(0, g.node_count());
+        let range = Range::<Ix>::new(0usize.as_num(), g.node_count().as_num());
         let source = range.ind_sample(rng).into();
         Self::new(rng, g, source)
     }
@@ -208,6 +222,25 @@ impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, Ed
     }
 }
 
+macro_rules! impl_uniform {
+    ($model:path, $num:ty) => {
+        impl<G: GraphRef + NodeCount + IntoNeighborEdgesDirected + Data<NodeWeight=N, EdgeWeight=E>, N, E: Copy + Into<f64>> TriggeringModelUniform<G, N, E, $num> for $model 
+            where G::NodeId: GraphIndex + From<$num>,
+                  G::EdgeId: GraphIndex
+                  {
+                  }
+    }
+}
+
+impl_uniform!(LT, usize);
+impl_uniform!(LT, u16);
+impl_uniform!(LT, u32);
+impl_uniform!(LT, u64);
+impl_uniform!(IC, usize);
+impl_uniform!(IC, u16);
+impl_uniform!(IC, u32);
+impl_uniform!(IC, u64);
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -240,8 +273,8 @@ mod test {
             }
             let vg = VecGraph::from_petgraph(g);
 
-            let ic = IC::new_uniform::<Vec<_>>(&vg);
-            let lt = LT::new_uniform::<Vec<_>>(&vg);
+            let ic: Vec<_> = IC::new_uniform(&vg);
+            let lt: Vec<_> = LT::new_uniform(&vg);
             TestResult::passed()
         }
     }
