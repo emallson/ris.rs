@@ -8,8 +8,8 @@ extern crate rand_mersenne_twister;
 extern crate petgraph;
 extern crate vec_graph;
 
-use bencher::{black_box, Bencher};
-use ris::{IC, LT, TriggeringModel, TriggeringModelUniform};
+use bencher::Bencher;
+use ris::{IC, TriggeringModelUniform};
 use std::collections::BTreeSet;
 use rand_mersenne_twister::mersenne;
 use vec_graph::VecGraph;
