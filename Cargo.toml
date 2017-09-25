@@ -4,6 +4,10 @@ license = "BSD-3-Clause"
 name = "ris"
 version = "0.1.0"
 
+[[bench]]
+harness = false
+name = "ris"
+
 [dependencies]
 as_num = "0.2.3"
 bit-set = "0.4.0"
@@ -23,7 +27,24 @@ git = "https://github.com/emallson/vec-graph.git"
 optional = false
 
 [dev-dependencies]
+bencher = "0.1.4"
+lazy_static = "0.2.8"
 quickcheck = "0.4.1"
+
+[dev-dependencies.capngraph]
+git = "https://github.com/emallson/capngraph.git"
+optional = false
+
+[dev-dependencies.rand-mersenne-twister]
+git = "https://github.com/emallson/rust-mersenne-twister.git"
+optional = false
 
 [features]
 hash = ["fnv"]
+
+[profile.bench]
+opt-level = 2
+debug = true
+
+[replace]
+"vec-graph:0.1.0" = { path = "../vec-graph/" }
