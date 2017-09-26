@@ -45,6 +45,3 @@ hash = ["fnv"]
 [profile.bench]
 opt-level = 2
 debug = true
-
-[replace]
-"vec-graph:0.1.0" = { path = "../vec-graph/" }
