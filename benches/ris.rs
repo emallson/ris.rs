@@ -8,15 +8,15 @@ extern crate rand_mersenne_twister;
 extern crate petgraph;
 extern crate vec_graph;
 
-use bencher::{black_box, Bencher};
-use ris::{IC, LT, TriggeringModel, TriggeringModelUniform};
+use bencher::Bencher;
+use ris::{IC, TriggeringModelUniform};
 use std::collections::BTreeSet;
 use rand_mersenne_twister::mersenne;
 use vec_graph::VecGraph;
 
 lazy_static! {
     static ref G: vec_graph::Graph<(), f32> = {
-        VecGraph::from_edges(capngraph::load_edges("benches/data/soc-Slashdot0902.bin").unwrap())
+        VecGraph::oriented_from_edges(capngraph::load_edges("benches/data/soc-Slashdot0902.bin").unwrap(), petgraph::Direction::Incoming)
     };
 }
 
